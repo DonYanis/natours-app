@@ -1,7 +1,55 @@
+const multer = require('multer');
+const sharp = require('sharp');
 const Tour = require('../models/tourModel');
-const APIFeatures = require('../utils/apiFeatures');
 const catchAsyncErrors = require('../utils/catchAsyncErrors');
+const factory = require('./handlerFactory');
 const AppError = require('../utils/appError');
+
+const multerStorage = multer.memoryStorage()
+
+const multerFilter = (req,file,cb) => {
+    if(file.mimetype.startsWith('image')){
+        cb(null, true);
+    }else{
+        cb(new AppError('Not an image', 400));
+    }
+}
+
+const upload = multer({
+    storage: multerStorage,
+    fileFilter: multerFilter
+});
+
+exports.uploadTourImages = upload.fields([
+    {name: 'imageCover', maxCount: 1},
+    {name: 'images', maxCount: 3}
+]);
+
+exports.resizeTourImages =catchAsyncErrors(async (req,res,next)=>{
+    if(!req.files.imageCover || !req.files.images) return next();
+
+    req.body.imageCover =  `tour-${req.params.id}-${Date.now()}-cover.jpeg`;
+    await sharp(req.file.imageCover[0].buffer)
+        .resize(2000,1333)
+        .toFormat('jpeg')
+        .jpeg({quality: 90})
+        .toFile(`public/img/tours/${req.body.imageCover}`);
+    
+        
+    await Promise.all( 
+        req.files.images.map(async (file, i)=>{
+            const filename =  `tour-${req.params.id}-${Date.now()}-${i+1}.jpeg`;
+            await sharp(file.buffer)
+                .resize(2000,1333)
+                .toFormat('jpeg')
+                .jpeg({quality: 90})
+                .toFile(`public/img/tours/${filename}`);
+            req.body.images.push(filename);
+        })
+    );
+
+    next();
+});
 
 // a middleware:
 exports.aliasTopTours = async (req, res, next) =>{
@@ -12,97 +60,16 @@ exports.aliasTopTours = async (req, res, next) =>{
 }
 
 //not a middleware
-exports.getAllTours = catchAsyncErrors(async (req,res,next)=>{
-     // excuting the query:
-     const features = new APIFeatures(Tour.find(), req.query)
-     .filter()
-     .sort()
-     .limitFields()
-     .paginate();
- 
-    const tours = await features.query;
+exports.getAllTours = factory.getAll(Tour);
 
-    res.status(200).json({
-        status:'success',
-        result: tours.length,
-        data : {
-            tours
-        }
-    });
-    // try{
-    //     // excuting the query:
-    //     const features = new APIFeatures(Tour.find(), req.query)
-    //         .filter()
-    //         .sort()
-    //         .limitFields()
-    //         .paginate();
-        
-    //     const tours = await features.query;
+exports.getTour = factory.getOne(Tour, {path: 'reviews'});
 
-    //     res.status(200).json({
-    //         status:'success',
-    //         result: tours.length,
-    //         data : {
-    //             tours
-    //         }
-    //     });
-    // }catch(err){
-    //     res.status(404).json({
-    //         status : 'fail',
-    //         message : err
-    //     });
-    // }
-})
+exports.createTour = factory.createOne(Tour);
 
-exports.getTour = catchAsyncErrors( async (req,res,next)=>{
-    const tour = await Tour.findById(req.params.id);
-    
-    if(!tour){
-        return next(new AppError('No tour found with that id',404))
-    }
+exports.updateTour = factory.updateOne(Tour);
 
-    res.status(200).json({
-        status:'success',
-        data : {
-            tour 
-        }
-    }); 
-});
+exports.deleteTour = factory.deleteOne(Tour);
 
-
- 
-exports.createTour = catchAsyncErrors( async (req,res,next)=>{
-    const newTour = await Tour.create(req.body);
-        res.status(201).json({
-            status : 'success',
-            data:{
-                tour : newTour
-            }
-         });
-});
-
-exports.updateTour = catchAsyncErrors(async (req,res,next)=>{
-    const tour = await Tour.findByIdAndUpdate(req.params.id, req.body,{
-        new: true,
-        runValidators: true
-    });
-
-    res.status(200).json({
-        status:'success',
-        data : {
-            tour 
-        }
-    });
-})
-
-exports.deleteTour = catchAsyncErrors(async (req,res,next)=>{
-    await Tour.findByIdAndDelete(req.params.id);
-
-    res.status(204).json({
-        status:'success',
-        data : null
-    });  
-})
 
 exports.getTourStats = catchAsyncErrors(async (req, res,next) =>{
     const stats = await Tour.aggregate([
@@ -187,4 +154,70 @@ exports.getMonthlyPlan = catchAsyncErrors(async (req, res,next) =>{
             plan 
         }
     });
-})
+});
+
+
+exports.getToursWithin = catchAsyncErrors(async (req, res,next) =>{
+    const {distance, latlng, unit} = req.params;
+    const [lat, lng] = latlng.split(',');
+    //unit = 'mi' or 'km'
+    const radius = unit === 'mi' ? distance / 3963.2 : distance / 6378.1;
+
+    if(!lat ||!lng){
+        return next(new AppError('Incorrect foramt of lat and lng !',400));
+    }
+
+    const tours = await Tour.find({
+        startLocation: {
+            $geoWithin: {
+                $centerSphere:[[lng, lat], radius]
+            }
+        }
+    });
+
+    res.status(200).json({ 
+        status:'success',
+        result: tours.length,
+        data : {
+            tours 
+        }
+    });
+});
+
+exports.getDistances = catchAsyncErrors(async (req, res,next) =>{
+    const {latlng, unit} = req.params;
+    const [lat, lng] = latlng.split(',');
+    //unit = 'mi' or 'km'
+    // convert to miles or km
+    const multiplier = unit === 'mi' ? 0.000621371 : 0.001
+    if(!lat ||!lng){
+        return next(new AppError('Incorrect foramt of lat and lng !',400));
+    }
+
+    const distances = await Tour.aggregate([
+        {
+            $geoNear: {
+                near: {
+                    type: 'Point',
+                    coordinates: [lng * 1, lat * 1]
+                },
+                distanceField: 'distance',
+                distanceMultiplier: multiplier
+            }
+        }, 
+        {
+            $project: {
+                distance: 1,
+                name: 1
+            }
+        }
+    ]);
+
+    res.status(200).json({ 
+        status:'success',
+        result: distances.length,
+        data : {
+            distances 
+        }
+    });
+});

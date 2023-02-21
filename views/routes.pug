@@ -1,0 +1,24 @@
+extends base
+
+block content
+    main.main
+        h2 Tours :
+        h3=`- main : ${routes.tours.main}` 
+        for route in routes.tours.routes 
+            h4=` --- ${route.route} : ${route.methods}`
+        h2 Users :
+        h3=`- main : ${routes.users.main}` 
+        for route in routes.users.routes 
+            h4=` --- ${route.route} : ${route.methods}`
+        h2 Reviews :
+        h3=`- main : ${routes.reviews.main}` 
+        for route in routes.reviews.routes 
+            h4=` --- ${route.route} : ${route.methods}`
+        h2 Bookings :
+        h3=`- main : ${routes.bookings.main}` 
+        for route in routes.bookings.routes 
+            h4=` --- ${route.route} : ${route.methods}`
+        h2 Views :
+        h3=`- main : ${routes.views.main}` 
+        for route in routes.views.routes 
+            h4=` --- ${route.route} : ${route.methods}`

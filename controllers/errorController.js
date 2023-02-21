@@ -21,26 +21,42 @@ const handleJWTError = () => new AppError('Invalid token. Please Login again',40
 
 const handleJWTExpiredError = () => new AppError('Your token has expired. Please Login again',401);
 
-const sendErrorDev = (err, res)=>{
-    res.status(err.statusCode).json({
-        status: err.status,
-        error : err,
-        message: err.message,
-        stack : err.stack
-    });
-}
-
-const sendErrorProd = (err, res)=>{
-    if(err.isOperational){
-        res.status(err.statusCode).json({
+const sendErrorDev = (err,req, res)=>{
+    
+    if(req.req.originalUrl.startsWith('/api')) {
+        req.status(err.statusCode).json({
             status: err.status,
-            message: err.message
+            error : err,
+            message: err.message,
+            stack : err.stack
         });
     }else{
+        req.status(err.statusCode).render('error',{
+            title: 'Something went wrong',
+            msg: err.message
+        })
+    }
+}
+
+const sendErrorProd = (err,req, res)=>{
+    if(req.req.originalUrl.startsWith('/api')) {
+        if(err.isOperational){
+            return res.status(err.statusCode).json({
+                status: err.status,
+                message: err.message
+            });
+        }
         console.error('ERROR ! ',err);
-        res.status(500).json({
+        return res.status(500).json({
             status: 'error',
             message: 'Something went wrong'
+        });
+        
+    }
+    if(err.isOperational){
+        return req.status(err.statusCode).render('error',{
+            title: 'Something went wrong',
+            msg: err.message
         });
     }
 }
